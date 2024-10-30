@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"unicode"
 )
 
@@ -18,48 +17,93 @@ import (
 // arrays
 // dictionaries
 
-// strings are encoded as <length>:<content>
-func decodeBencode(bencodedString string) (interface{}, error) {
-	if unicode.IsDigit(rune(bencodedString[0])) {
-		return decodeString(bencodedString)
-	} else if rune(bencodedString[0]) == 'i' {
-		return decodeInteger(bencodedString)
+func decodeBencode(bencodedString string, index *int) (interface{}, error) {
+	if len(bencodedString) <= 2 {
+		return []string{}, nil
 	}
 
-	return "", nil
+	datatypeIdentifer := rune(bencodedString[*index])
+
+	switch {
+	case datatypeIdentifer == 'l':
+		return decodeArray(bencodedString, index)
+	case unicode.IsDigit(datatypeIdentifer):
+		return decodeString(bencodedString, index)
+	case datatypeIdentifer == 'i':
+		return decodeInteger(bencodedString, index)
+	default:
+		return nil, fmt.Errorf("unexpected value %q", bencodedString[*index])
+	}
 }
 
-func decodeString(bencodedString string) (interface{}, error) {
+// strings are encoded as <length>:<content>
+func decodeString(bencodedString string, index *int) (interface{}, error) {
 	var firstColonIndex int
 
-	for i := 0; i < len(bencodedString); i++ {
+	for i := *index; i < len(bencodedString); i++ {
 		if bencodedString[i] == ':' {
 			firstColonIndex = i
 			break
 		}
 	}
 
-	lengthStr := bencodedString[:firstColonIndex]
+	lengthStr := bencodedString[*index:firstColonIndex]
 
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
 		return "", err
 	}
 
+	*index += length + 2
 	return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
 }
 
 // integers are encoded as i<number>e
 // example i52e => 52,   i-52e => -52
-func decodeInteger(bencodedString string) (interface{}, error) {
-	endIndex := strings.Index(bencodedString, "e")
+func decodeInteger(bencodedString string, index *int) (interface{}, error) {
+	var endIndex int
 
-	integer, err := strconv.Atoi(bencodedString[1:endIndex])
+	*index += 1
+	for i := *index; i < len(bencodedString); i++ {
+		if bencodedString[i] == 'e' {
+			endIndex = i
+			break
+		}
+	}
+
+	integer, err := strconv.Atoi(bencodedString[*index:endIndex])
 	if err != nil {
 		return "", err
 	}
 
+	*index += (endIndex - *index) + 1
+
 	return integer, nil
+}
+
+// arrays are encoded as l<bencoded_elements>e
+//
+// lli4eei5ee
+// l5:helloi52ee
+// lli376e6:orangeee
+func decodeArray(bencodedString string, index *int) (interface{}, error) {
+	*index += 1
+	elements := make([]interface{}, 0)
+
+	for {
+		result, err := decodeBencode(bencodedString, index)
+		if err != nil {
+			fmt.Println(err)
+		}
+		elements = append(elements, result)
+
+		if bencodedString[*index] == 'e' {
+			*index += 1
+			break
+		}
+	}
+
+	return elements, nil
 }
 
 func main() {
@@ -68,7 +112,8 @@ func main() {
 	if command == "decode" {
 		bencodedValue := os.Args[2]
 
-		decoded, err := decodeBencode(bencodedValue)
+		index := 0
+		decoded, err := decodeBencode(bencodedValue, &index)
 		if err != nil {
 			fmt.Println(err)
 			return
