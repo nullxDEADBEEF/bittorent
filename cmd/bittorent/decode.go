@@ -44,20 +44,22 @@ func decodeString(bencodedString string, index *int) (interface{}, error) {
 		}
 	}
 
-	lengthStr := bencodedString[*index:firstColonIndex]
+	if firstColonIndex == 0 {
+		return nil, fmt.Errorf("Invalid string, missing colon seperator")
+	}
 
+	lengthStr := bencodedString[*index:firstColonIndex]
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("Invalid length: %v", err)
 	}
 
-	numDigits := -1
-	for range lengthStr {
-		numDigits++
+	if firstColonIndex+1+length > len(bencodedString) {
+		return nil, fmt.Errorf("Invalid length, string data exceeds bencoded string")
 	}
 
-	*index += length + numDigits + 2
-	return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
+	*index = firstColonIndex + 1 + length
+	return []byte(bencodedString[firstColonIndex+1 : firstColonIndex+1+length]), nil
 }
 
 // integers are encoded as i<number>e
@@ -75,7 +77,7 @@ func decodeInteger(bencodedString string, index *int) (interface{}, error) {
 
 	integer, err := strconv.Atoi(bencodedString[*index:endIndex])
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("Invalid integer value: %v", err)
 	}
 
 	*index += (endIndex - *index) + 1
@@ -99,7 +101,7 @@ func decodeArray(bencodedString string, index *int) (interface{}, error) {
 	for {
 		result, err := decodeBencode(bencodedString, index)
 		if err != nil {
-			fmt.Println(err)
+			return nil, err
 		}
 		elements = append(elements, result)
 
@@ -125,22 +127,19 @@ func decodeDictionary(bencodedString string, index *int) (interface{}, error) {
 	*index += 1
 	dictionary := map[string]interface{}{}
 
-	currentKey := ""
-	localIndex := 0
-
 	for {
-		result, err := decodeBencode(bencodedString, index)
+
+		key, err := decodeString(bencodedString, index)
 		if err != nil {
-			fmt.Println(err)
+			return nil, fmt.Errorf("Error decoding key: %v", err)
 		}
 
-		if localIndex%2 == 0 {
-			currentKey = result.(string)
-			localIndex++
-		} else {
-			dictionary[currentKey] = result
-			localIndex++
+		value, err := decodeBencode(bencodedString, index)
+		if err != nil {
+			return nil, fmt.Errorf("Error decoding value for key %q: %v", key, err)
 		}
+
+		dictionary[string(key.([]byte))] = value
 
 		if bencodedString[*index] == 'e' {
 			*index += 1
@@ -148,8 +147,7 @@ func decodeDictionary(bencodedString string, index *int) (interface{}, error) {
 		}
 	}
 
-	dictionary = sortMapLexicographically(dictionary)
-	return dictionary, nil
+	return sortMapLexicographically(dictionary), nil
 }
 
 func sortMapLexicographically(dictionary map[string]interface{}) map[string]interface{} {
