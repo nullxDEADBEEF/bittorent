@@ -8,6 +8,24 @@ import (
 	"unicode/utf8"
 )
 
+type BencodeDecoder struct {
+	data  []byte
+	index *int
+}
+
+func NewBencodeDecoder(data []byte) *BencodeDecoder {
+	index := 0
+	return &BencodeDecoder{data, &index}
+}
+
+const (
+	typeList  = 'l'
+	typeDict  = 'd'
+	typeInt   = 'i'
+	endMarker = 'e'
+	separator = ':'
+)
+
 // Bencode (said Bee-encode) is a serialization format used in the Bit torrent protocol
 // used to torrent files and in communication between trackers and peers
 
@@ -17,46 +35,42 @@ import (
 // arrays
 // dictionaries
 
-func decodeBencode(bencodedData []byte, index *int) (interface{}, error) {
-	datatypeIdentifer := bencodedData[*index]
+func (d *BencodeDecoder) Decode() (interface{}, error) {
+	if len(d.data) == 0 {
+		return nil, fmt.Errorf("empty input data")
+	}
 
+	dataType := d.data[*d.index]
 	var result interface{}
 	var err error
 
 	switch {
-	case datatypeIdentifer == 'l':
-		result, err = decodeArray(bencodedData, index)
-	case datatypeIdentifer == 'd':
-		result, err = decodeDictionary(bencodedData, index)
-	case unicode.IsDigit(rune(datatypeIdentifer)):
-		result, err = decodeString(bencodedData, index)
-	case datatypeIdentifer == 'i':
-		result, err = decodeInteger(bencodedData, index)
+	case dataType == typeList:
+		result, err = d.decodeList()
+	case dataType == typeDict:
+		result, err = d.decodeDict()
+	case unicode.IsDigit(rune(dataType)):
+		result, err = d.decodeString()
+	case dataType == typeInt:
+		result, err = d.decodeInteger()
 	default:
-		return nil, fmt.Errorf("unexpected value %q", bencodedData[*index])
+		return nil, fmt.Errorf("invalid data type identifier: %q", dataType)
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert []byte to string if it's valid UTF-8
-	if valueBytes, ok := result.([]byte); ok {
-		if utf8.Valid(valueBytes) {
-			return string(valueBytes), nil
-		}
-	}
-
-	return result, nil
+	return d.convertBytesToStringIfValid(result), nil
 }
 
 // strings are encoded as <length>:<content>
-func decodeString(bencodedData []byte, index *int) (interface{}, error) {
+func (d *BencodeDecoder) decodeString() (interface{}, error) {
 	var firstColonIndex int
 	colonFound := false
 
-	for i := *index; i < len(bencodedData); i++ {
-		if bencodedData[i] == ':' {
+	for i := *d.index; i < len(d.data); i++ {
+		if d.data[i] == ':' {
 			firstColonIndex = i
 			colonFound = true
 			break
@@ -67,41 +81,46 @@ func decodeString(bencodedData []byte, index *int) (interface{}, error) {
 		return nil, fmt.Errorf("invalid string, missing colon separator")
 	}
 
-	lengthStr := string(bencodedData[*index:firstColonIndex])
+	lengthStr := string(d.data[*d.index:firstColonIndex])
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid length: %v", err)
+		return nil, fmt.Errorf("invalid string length: %w", err)
 	}
 
-	if firstColonIndex+1+length > len(bencodedData) {
-		return nil, fmt.Errorf("invalid length: expected %d bytes after colon, but only %d bytes remain",
-			length, len(bencodedData)-(firstColonIndex+1))
+	contentStart := firstColonIndex + 1
+	contentEnd := contentStart + length
+
+	if contentEnd > len(d.data) {
+		return nil, fmt.Errorf("invalid string: content length exceeds data length")
 	}
 
-	*index = firstColonIndex + 1 + length
-	return bencodedData[firstColonIndex+1 : firstColonIndex+1+length], nil
+	*d.index = contentEnd
+	return d.data[contentStart:contentEnd], nil
 }
 
 // integers are encoded as i<number>e
 // example i52e => 52,   i-52e => -52
-func decodeInteger(bencodedData []byte, index *int) (interface{}, error) {
-	var endIndex int
+func (d *BencodeDecoder) decodeInteger() (interface{}, error) {
+	*d.index++
+	endIndex := -1
 
-	*index += 1
-	for i := *index; i < len(bencodedData); i++ {
-		if bencodedData[i] == 'e' {
+	for i := *d.index; i < len(d.data); i++ {
+		if d.data[i] == endMarker {
 			endIndex = i
 			break
 		}
 	}
 
-	integer, err := strconv.Atoi(string(bencodedData[*index:endIndex]))
-	if err != nil {
-		return nil, fmt.Errorf("invalid integer value: %v", err)
+	if endIndex == -1 {
+		return nil, fmt.Errorf("invalid integer: missing end marker")
 	}
 
-	*index += (endIndex - *index) + 1
+	integer, err := strconv.Atoi(string(d.data[*d.index:endIndex]))
+	if err != nil {
+		return nil, fmt.Errorf("invalid integer value: %w", err)
+	}
 
+	*d.index = endIndex + 1
 	return integer, nil
 }
 
@@ -110,34 +129,27 @@ func decodeInteger(bencodedData []byte, index *int) (interface{}, error) {
 // lli4eei5ee
 // l5:helloi52ee
 // lli376e6:orangeee
-func decodeArray(bencodedData []byte, index *int) (interface{}, error) {
-	if len(bencodedData) <= 2 {
+func (d *BencodeDecoder) decodeList() (interface{}, error) {
+	if len(d.data) <= 2 {
 		return []interface{}{}, nil
 	}
 
-	*index += 1
-	elements := make([]interface{}, 0)
+	*d.index++
+	var elements []interface{}
 
-	for {
-		result, err := decodeBencode(bencodedData, index)
+	for *d.index < len(d.data) && d.data[*d.index] != endMarker {
+		element, err := d.Decode()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error decoding element: %w", err)
 		}
-
-		if valueBytes, ok := result.([]byte); ok {
-			if utf8.Valid(valueBytes) {
-				result = string(valueBytes)
-			}
-		}
-
-		elements = append(elements, result)
-
-		if bencodedData[*index] == 'e' {
-			*index += 1
-			break
-		}
+		elements = append(elements, element)
 	}
 
+	if *d.index >= len(d.data) {
+		return nil, fmt.Errorf("invalid list: missing end marker")
+	}
+
+	*d.index++
 	return elements, nil
 }
 
@@ -146,47 +158,46 @@ func decodeArray(bencodedData []byte, index *int) (interface{}, error) {
 //
 // {"hello": 52, "foo":"bar"} => d3:foo3:bar5:helloi52ee
 // {"inner_dict":{"key1":"value1","key2":42,"list_key":["item1","item2",3]}} => d10:inner_dictd4:key16:value14:key2i42e8:list_keyl5:item15:item2i3eeee
-func decodeDictionary(bencodedData []byte, index *int) (interface{}, error) {
-	if len(bencodedData) <= 2 {
+func (d *BencodeDecoder) decodeDict() (interface{}, error) {
+	if len(d.data) <= 2 {
 		return map[string]interface{}{}, nil
 	}
 
-	*index += 1
+	*d.index++
 	dictionary := map[string]interface{}{}
 
-	for {
-		key, err := decodeString(bencodedData, index)
+	for *d.index < len(d.data) && d.data[*d.index] != endMarker {
+		key, err := d.decodeString()
 		if err != nil {
-			return nil, fmt.Errorf("error decoding key: %v", err)
+			return nil, fmt.Errorf("error decoding dictionary key: %w", err)
 		}
 
-		value, err := decodeBencode(bencodedData, index)
+		value, err := d.Decode()
 		if err != nil {
-			return nil, fmt.Errorf("error decoding value for key %q: %v", key, err)
+			return nil, fmt.Errorf("error decoding value for key %q: %w", key, err)
 		}
 
 		keyStr := string(key.([]byte))
-
-		if valueBytes, ok := value.([]byte); ok {
-			if utf8.Valid(valueBytes) {
-				dictionary[keyStr] = string(valueBytes)
-			} else {
-				dictionary[keyStr] = valueBytes
-			}
-		} else {
-			dictionary[keyStr] = value
-		}
-
-		if bencodedData[*index] == 'e' {
-			*index += 1
-			break
-		}
+		dictionary[keyStr] = d.convertBytesToStringIfValid(value)
 	}
 
-	return sortMapLexicographically(dictionary), nil
+	if *d.index >= len(d.data) {
+		return nil, fmt.Errorf("invalid dictionary: missing end marker")
+	}
+
+	*d.index++
+	return d.sortDictionary(dictionary), nil
 }
 
-func sortMapLexicographically(dictionary map[string]interface{}) map[string]interface{} {
+func (d *BencodeDecoder) convertBytesToStringIfValid(value interface{}) interface{} {
+	if bytes, ok := value.([]byte); ok && utf8.Valid(bytes) {
+		return string(bytes)
+	}
+
+	return value
+}
+
+func (d *BencodeDecoder) sortDictionary(dictionary map[string]interface{}) map[string]interface{} {
 	sortedMap := make(map[string]interface{}, len(dictionary))
 	keys := make([]string, 0, len(dictionary))
 	for k := range dictionary {

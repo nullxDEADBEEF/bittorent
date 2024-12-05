@@ -13,13 +13,12 @@ func main() {
 	case "decode":
 		bencodedValue := os.Args[2]
 
-		index := 0
-		decoded, err := decodeBencode([]byte(bencodedValue), &index)
+		decoder := NewBencodeDecoder([]byte(bencodedValue))
+		decoded, err := decoder.Decode()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-
 		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
 	case "info":
@@ -29,13 +28,17 @@ func main() {
 			return
 		}
 
-		bencodedInfo := encodeTorrentInfo(torrent["info"].(map[string]interface{}))
+		encoder := NewTorrentEncoder()
+		bencodedInfo := encoder.encodeTorrentInfo(torrent["info"].(map[string]interface{}))
 		infoHash := calculateSHA1Hash(bencodedInfo)
 
-		fmt.Printf("Tracker URL: %s\nLength: %d\nInfo Hash: %s\n",
+		torrentInfo := torrent["info"].(map[string]interface{})
+
+		fmt.Printf("Tracker URL: %s\nLength: %d\nInfo Hash: %s\nPiece Length: %d\n",
 			torrent["announce"],
-			torrent["info"].(map[string]interface{})["length"],
-			infoHash)
+			torrentInfo["length"],
+			infoHash,
+			torrentInfo["piece length"])
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)

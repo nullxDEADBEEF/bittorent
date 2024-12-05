@@ -8,6 +8,26 @@ import (
 	"sort"
 )
 
+type BencodeType interface {
+	string | int | []byte | []interface{} | map[string]interface{}
+}
+
+const (
+	dictStart = 'd'
+	dictEnd   = 'e'
+	listStart = 'l'
+	listEnd   = 'e'
+	intStart  = 'i'
+	intEnd    = 'e'
+	delimiter = ':'
+)
+
+type TorrentEncoder struct{}
+
+func NewTorrentEncoder() *TorrentEncoder {
+	return &TorrentEncoder{}
+}
+
 // torrent file(also known as metainfo file) contains bencoded dictionary with the following keys and values:
 // announce => URL to a "tracker", a central server that keeps track of peers participating in the sharing of a torrent
 // info, dictionary with keys
@@ -23,10 +43,9 @@ func parseTorrentFile(filepath string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to read file: %v", err)
 	}
 
-	index := 0
-	decoded, err := decodeBencode(data, &index)
+	decoder := NewBencodeDecoder(data)
+	decoded, err := decoder.Decode()
 	if err != nil {
-		fmt.Printf("Error occurred at position %d\n", index)
 		return nil, fmt.Errorf("failed to decode dictionary: %v", err)
 	}
 
@@ -45,11 +64,11 @@ func calculateSHA1Hash(bencodedData []byte) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func encodeTorrentInfo(torrentInfo map[string]interface{}) []byte {
-	return []byte(encodeDict(torrentInfo))
+func (e *TorrentEncoder) encodeTorrentInfo(torrentInfo map[string]interface{}) []byte {
+	return []byte(e.encodeDict(torrentInfo))
 }
 
-func encodeValue(value interface{}) string {
+func (e *TorrentEncoder) encodeValue(value interface{}) string {
 	switch v := value.(type) {
 	case string:
 		return fmt.Sprintf("%d:%s", len(v), v)
@@ -58,36 +77,37 @@ func encodeValue(value interface{}) string {
 	case []byte:
 		return fmt.Sprintf("%d:%s", len(v), string(v))
 	case []interface{}:
-		return encodeArray(v)
+		return e.encodeArray(v)
 	case map[string]interface{}:
-		return encodeDict(v)
+		return e.encodeDict(v)
 	default:
 		fmt.Println("Could not encode: ", v)
 		return ""
 	}
 }
 
-func encodeArray(array []interface{}) string {
+func (e *TorrentEncoder) encodeArray(array []interface{}) string {
 	bencodedArray := "l"
 	for _, item := range array {
-		bencodedArray += encodeValue(item)
+		bencodedArray += e.encodeValue(item)
 	}
 	bencodedArray += "e"
 	return bencodedArray
 }
 
-func encodeDict(dict map[string]interface{}) string {
-	bencodedDict := "d"
-	var keys []string
+func (e *TorrentEncoder) encodeDict(dict map[string]interface{}) string {
+	result := string(dictStart)
+
+	keys := make([]string, 0, len(dict))
 	for key := range dict {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
 	for _, key := range keys {
-		bencodedDict += fmt.Sprintf("%d:%s", len(key), key)
-		bencodedDict += encodeValue(dict[key])
+		result += fmt.Sprintf("%d%c%s", len(key), delimiter, key)
+		result += e.encodeValue(dict[key])
 	}
-	bencodedDict += "e"
-	return bencodedDict
+
+	return result + string(dictEnd)
 }
