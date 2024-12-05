@@ -14,7 +14,7 @@ func main() {
 		bencodedValue := os.Args[2]
 
 		index := 0
-		decoded, err := decodeBencode(bencodedValue, &index)
+		decoded, err := decodeBencode([]byte(bencodedValue), &index)
 		if err != nil {
 			fmt.Println(err)
 			return

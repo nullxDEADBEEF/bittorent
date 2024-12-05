@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Bencode (said Bee-encode) is a serialization format used in the Bit torrent protocol
@@ -16,68 +17,87 @@ import (
 // arrays
 // dictionaries
 
-func decodeBencode(bencodedString string, index *int) (interface{}, error) {
-	datatypeIdentifer := rune(bencodedString[*index])
+func decodeBencode(bencodedData []byte, index *int) (interface{}, error) {
+	datatypeIdentifer := bencodedData[*index]
+
+	var result interface{}
+	var err error
 
 	switch {
 	case datatypeIdentifer == 'l':
-		return decodeArray(bencodedString, index)
+		result, err = decodeArray(bencodedData, index)
 	case datatypeIdentifer == 'd':
-		return decodeDictionary(bencodedString, index)
-	case unicode.IsDigit(datatypeIdentifer):
-		return decodeString(bencodedString, index)
+		result, err = decodeDictionary(bencodedData, index)
+	case unicode.IsDigit(rune(datatypeIdentifer)):
+		result, err = decodeString(bencodedData, index)
 	case datatypeIdentifer == 'i':
-		return decodeInteger(bencodedString, index)
+		result, err = decodeInteger(bencodedData, index)
 	default:
-		return nil, fmt.Errorf("unexpected value %q", bencodedString[*index])
+		return nil, fmt.Errorf("unexpected value %q", bencodedData[*index])
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert []byte to string if it's valid UTF-8
+	if valueBytes, ok := result.([]byte); ok {
+		if utf8.Valid(valueBytes) {
+			return string(valueBytes), nil
+		}
+	}
+
+	return result, nil
 }
 
 // strings are encoded as <length>:<content>
-func decodeString(bencodedString string, index *int) (interface{}, error) {
+func decodeString(bencodedData []byte, index *int) (interface{}, error) {
 	var firstColonIndex int
+	colonFound := false
 
-	for i := *index; i < len(bencodedString); i++ {
-		if bencodedString[i] == ':' {
+	for i := *index; i < len(bencodedData); i++ {
+		if bencodedData[i] == ':' {
 			firstColonIndex = i
+			colonFound = true
 			break
 		}
 	}
 
-	if firstColonIndex == 0 {
-		return nil, fmt.Errorf("Invalid string, missing colon seperator")
+	if !colonFound {
+		return nil, fmt.Errorf("invalid string, missing colon separator")
 	}
 
-	lengthStr := bencodedString[*index:firstColonIndex]
+	lengthStr := string(bencodedData[*index:firstColonIndex])
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
-		return nil, fmt.Errorf("Invalid length: %v", err)
+		return nil, fmt.Errorf("invalid length: %v", err)
 	}
 
-	if firstColonIndex+1+length > len(bencodedString) {
-		return nil, fmt.Errorf("Invalid length, string data exceeds bencoded string")
+	if firstColonIndex+1+length > len(bencodedData) {
+		return nil, fmt.Errorf("invalid length: expected %d bytes after colon, but only %d bytes remain",
+			length, len(bencodedData)-(firstColonIndex+1))
 	}
 
 	*index = firstColonIndex + 1 + length
-	return []byte(bencodedString[firstColonIndex+1 : firstColonIndex+1+length]), nil
+	return bencodedData[firstColonIndex+1 : firstColonIndex+1+length], nil
 }
 
 // integers are encoded as i<number>e
 // example i52e => 52,   i-52e => -52
-func decodeInteger(bencodedString string, index *int) (interface{}, error) {
+func decodeInteger(bencodedData []byte, index *int) (interface{}, error) {
 	var endIndex int
 
 	*index += 1
-	for i := *index; i < len(bencodedString); i++ {
-		if bencodedString[i] == 'e' {
+	for i := *index; i < len(bencodedData); i++ {
+		if bencodedData[i] == 'e' {
 			endIndex = i
 			break
 		}
 	}
 
-	integer, err := strconv.Atoi(bencodedString[*index:endIndex])
+	integer, err := strconv.Atoi(string(bencodedData[*index:endIndex]))
 	if err != nil {
-		return nil, fmt.Errorf("Invalid integer value: %v", err)
+		return nil, fmt.Errorf("invalid integer value: %v", err)
 	}
 
 	*index += (endIndex - *index) + 1
@@ -90,22 +110,29 @@ func decodeInteger(bencodedString string, index *int) (interface{}, error) {
 // lli4eei5ee
 // l5:helloi52ee
 // lli376e6:orangeee
-func decodeArray(bencodedString string, index *int) (interface{}, error) {
-	if len(bencodedString) <= 2 {
-		return []string{}, nil
+func decodeArray(bencodedData []byte, index *int) (interface{}, error) {
+	if len(bencodedData) <= 2 {
+		return []interface{}{}, nil
 	}
 
 	*index += 1
 	elements := make([]interface{}, 0)
 
 	for {
-		result, err := decodeBencode(bencodedString, index)
+		result, err := decodeBencode(bencodedData, index)
 		if err != nil {
 			return nil, err
 		}
+
+		if valueBytes, ok := result.([]byte); ok {
+			if utf8.Valid(valueBytes) {
+				result = string(valueBytes)
+			}
+		}
+
 		elements = append(elements, result)
 
-		if bencodedString[*index] == 'e' {
+		if bencodedData[*index] == 'e' {
 			*index += 1
 			break
 		}
@@ -119,29 +146,38 @@ func decodeArray(bencodedString string, index *int) (interface{}, error) {
 //
 // {"hello": 52, "foo":"bar"} => d3:foo3:bar5:helloi52ee
 // {"inner_dict":{"key1":"value1","key2":42,"list_key":["item1","item2",3]}} => d10:inner_dictd4:key16:value14:key2i42e8:list_keyl5:item15:item2i3eeee
-func decodeDictionary(bencodedString string, index *int) (interface{}, error) {
-	if len(bencodedString) <= 2 {
-		return map[string]string{}, nil
+func decodeDictionary(bencodedData []byte, index *int) (interface{}, error) {
+	if len(bencodedData) <= 2 {
+		return map[string]interface{}{}, nil
 	}
 
 	*index += 1
 	dictionary := map[string]interface{}{}
 
 	for {
-
-		key, err := decodeString(bencodedString, index)
+		key, err := decodeString(bencodedData, index)
 		if err != nil {
-			return nil, fmt.Errorf("Error decoding key: %v", err)
+			return nil, fmt.Errorf("error decoding key: %v", err)
 		}
 
-		value, err := decodeBencode(bencodedString, index)
+		value, err := decodeBencode(bencodedData, index)
 		if err != nil {
-			return nil, fmt.Errorf("Error decoding value for key %q: %v", key, err)
+			return nil, fmt.Errorf("error decoding value for key %q: %v", key, err)
 		}
 
-		dictionary[string(key.([]byte))] = value
+		keyStr := string(key.([]byte))
 
-		if bencodedString[*index] == 'e' {
+		if valueBytes, ok := value.([]byte); ok {
+			if utf8.Valid(valueBytes) {
+				dictionary[keyStr] = string(valueBytes)
+			} else {
+				dictionary[keyStr] = valueBytes
+			}
+		} else {
+			dictionary[keyStr] = value
+		}
+
+		if bencodedData[*index] == 'e' {
 			*index += 1
 			break
 		}

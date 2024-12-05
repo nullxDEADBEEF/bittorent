@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -18,52 +17,25 @@ import (
 //   - pieces: concatenated SHA-1 hashes of each piece
 //
 // NOTE: info dictionary is slightly different for multi-file torrents
-func parseTorrentFile(filename string) (map[string]interface{}, error) {
-	file, err := os.Open(filename)
+func parseTorrentFile(filepath string) (map[string]interface{}, error) {
+	data, err := os.ReadFile(filepath)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-
-	if !scanner.Scan() {
-		return nil, fmt.Errorf("Failed to read file or file is empty")
+		return nil, fmt.Errorf("failed to read file: %v", err)
 	}
 
 	index := 0
-	result, err := decodeDictionary(scanner.Text(), &index)
+	decoded, err := decodeBencode(data, &index)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to decode dictionary: %w", err)
+		fmt.Printf("Error occurred at position %d\n", index)
+		return nil, fmt.Errorf("failed to decode dictionary: %v", err)
 	}
 
-	torrent, ok := result.(map[string]interface{})
+	torrent, ok := decoded.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("expected map[string]interface{} but got %T", result)
-	}
-
-	torrentInfo, ok := torrent["info"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid 'info' field in torrent")
-	}
-
-	pieces, ok := torrentInfo["pieces"].([]byte)
-	if !ok {
-		return nil, fmt.Errorf("expected 'pieces' to be a []byte, but got %T", torrentInfo["pieces"])
-	}
-
-	torrentInfo["pieces"] = calculatePieceHashes(pieces)
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("Error reading file: %w", err)
+		return nil, fmt.Errorf("expected dictionary, got %T", decoded)
 	}
 
 	return torrent, nil
-}
-
-// TODO: implement
-func calculatePieceHashes(pieces []byte) []byte {
-	return pieces
 }
 
 func calculateSHA1Hash(bencodedData []byte) string {
