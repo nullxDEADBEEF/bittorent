@@ -57,9 +57,9 @@ func parseTorrentFile(filepath string) (map[string]interface{}, error) {
 	return torrent, nil
 }
 
-func calculateSHA1Hash(bencodedData []byte) string {
+func (e *TorrentEncoder) CalculateSHA1Hash(bencodedInfo []byte) string {
 	hash := sha1.New()
-	hash.Write(bencodedData)
+	hash.Write(bencodedInfo)
 
 	return hex.EncodeToString(hash.Sum(nil))
 }

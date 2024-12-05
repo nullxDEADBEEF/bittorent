@@ -30,7 +30,7 @@ func main() {
 
 		encoder := NewTorrentEncoder()
 		bencodedInfo := encoder.encodeTorrentInfo(torrent["info"].(map[string]interface{}))
-		infoHash := calculateSHA1Hash(bencodedInfo)
+		infoHash := encoder.CalculateSHA1Hash(bencodedInfo)
 
 		torrentInfo := torrent["info"].(map[string]interface{})
 
