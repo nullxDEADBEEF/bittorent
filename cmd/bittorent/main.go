@@ -29,16 +29,17 @@ func main() {
 		}
 
 		encoder := NewTorrentEncoder()
-		bencodedInfo := encoder.encodeTorrentInfo(torrent["info"].(map[string]interface{}))
-		infoHash := encoder.CalculateSHA1Hash(bencodedInfo)
-
 		torrentInfo := torrent["info"].(map[string]interface{})
+		bencodedInfo := encoder.encodeTorrentInfo(torrentInfo)
+		infoHash := encoder.CalculateSHA1Hash(bencodedInfo)
+		pieceHashes := encoder.GetTorrentPieceHashes(torrentInfo["pieces"].([]byte))
 
-		fmt.Printf("Tracker URL: %s\nLength: %d\nInfo Hash: %s\nPiece Length: %d\n",
+		fmt.Printf("Tracker URL: %s\nLength: %d\nInfo Hash: %s\nPiece Length: %d\nPiece Hashes:\n",
 			torrent["announce"],
 			torrentInfo["length"],
 			infoHash,
 			torrentInfo["piece length"])
+		encoder.PrintPieceHashes(pieceHashes)
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)

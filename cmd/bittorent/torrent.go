@@ -57,6 +57,23 @@ func parseTorrentFile(filepath string) (map[string]interface{}, error) {
 	return torrent, nil
 }
 
+func (e *TorrentEncoder) GetTorrentPieceHashes(bencodedPieces []byte) []string {
+	pieceHashes := make([]string, 0)
+	hashSizeInBytes := 20
+
+	for i := 0; i < len(bencodedPieces); i += hashSizeInBytes {
+		pieceHashes = append(pieceHashes, hex.EncodeToString(bencodedPieces[i:i+hashSizeInBytes]))
+	}
+
+	return pieceHashes
+}
+
+func (e *TorrentEncoder) PrintPieceHashes(pieceHashes []string) {
+	for _, hash := range pieceHashes {
+		fmt.Println(hash)
+	}
+}
+
 func (e *TorrentEncoder) CalculateSHA1Hash(bencodedInfo []byte) string {
 	hash := sha1.New()
 	hash.Write(bencodedInfo)
