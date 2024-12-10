@@ -8,10 +8,6 @@ import (
 	"sort"
 )
 
-type BencodeType interface {
-	string | int | []byte | []interface{} | map[string]interface{}
-}
-
 const (
 	dictStart = 'd'
 	dictEnd   = 'e'

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 )
@@ -19,6 +22,8 @@ func main() {
 		handleInfo(os.Args[2])
 	case "peers":
 		handlePeers(os.Args[2])
+	case "handshake":
+		handleHandshake(os.Args[2], os.Args[3])
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
@@ -80,6 +85,53 @@ func handlePeers(torrentPath string) {
 	}
 }
 
+func handleHandshake(torrentPath string, peerIP string) {
+	conn, err := net.Dial("tcp", peerIP)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer conn.Close()
+
+	torrent, err := parseTorrentFile(torrentPath)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	torrentInfo := torrent["info"].(map[string]interface{})
+	encoder := NewTorrentEncoder()
+	bencodedInfo := encoder.encodeTorrentInfo(torrentInfo)
+	infoHash := encoder.CalculateSHA1Hash(bencodedInfo)
+
+	handshake := make([]byte, 0)
+	handshake = append(handshake, byte(19))
+	handshake = append(handshake, []byte("BitTorrent protocol")...)
+	handshake = append(handshake, make([]byte, 8)...)
+
+	infoHashBytes, err := hex.DecodeString(infoHash)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	handshake = append(handshake, infoHashBytes...)
+
+	handshake = append(handshake, generatePeerID()...)
+
+	conn.Write(handshake)
+
+	handshakeLength := 68
+	response := make([]byte, handshakeLength)
+	_, err = conn.Read(response)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	peerIDInHandshake := response[48:]
+	fmt.Println("Peer ID: " + hex.EncodeToString(peerIDInHandshake))
+}
+
 func getPeers(torrent map[string]interface{}, torrentInfo map[string]interface{}, infoHash string) ([]string, error) {
 	encodedInfoHash := encodeInfoHash(infoHash)
 
@@ -135,4 +187,15 @@ func parsePeers(peersBytes []byte) []string {
 		peers = append(peers, fmt.Sprintf("%s:%d", ip, port))
 	}
 	return peers
+}
+
+func generatePeerID() []byte {
+	peerID := make([]byte, 20)
+	_, err := rand.Read(peerID)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+
+	return peerID
 }
