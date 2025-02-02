@@ -12,8 +12,8 @@ func main() {
 	command := os.Args[1]
 
 	// flags for commands
-	downloadCmd := flag.NewFlagSet("download_piece", flag.ExitOnError)
-	outputFile := downloadCmd.String("o", "", "output file path")
+	downloadPieceCmd := flag.NewFlagSet("download_piece", flag.ExitOnError)
+	downloadCmd := flag.NewFlagSet("download", flag.ExitOnError)
 
 	switch command {
 	case "decode":
@@ -31,30 +31,16 @@ func main() {
 
 		defer conn.Close()
 	case "download_piece":
-		downloadCmd.Parse(os.Args[2:])
+		outputFile := downloadPieceCmd.String("o", "", "output file path")
+		downloadPieceCmd.Parse(os.Args[2:])
 
 		if *outputFile == "" {
 			fmt.Println("Output file path is required")
-			downloadCmd.PrintDefaults()
+			downloadPieceCmd.PrintDefaults()
 			os.Exit(1)
 		}
 
-		// create directory if it doesnt exist
-		outputDir := filepath.Dir(*outputFile)
-		if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-			err := os.MkdirAll(outputDir, os.ModePerm)
-			if err != nil {
-				fmt.Println("Failed to create directory", err)
-				return
-			}
-		}
-
-		// create file if it doesnt exist
-		file, err := os.Create(*outputFile)
-		if err != nil {
-			fmt.Println("Failed to create output file", err)
-			return
-		}
+		file := createFile(*outputFile)
 		defer file.Close()
 
 		pieceIndex, err := strconv.Atoi(os.Args[5])
@@ -66,9 +52,47 @@ func main() {
 		torrentPath := os.Args[4]
 		pieceData := downloadPiece(torrentPath, pieceIndex)
 		file.Write(pieceData)
+	case "download":
+		outputFile := downloadCmd.String("o", "", "output file path")
+		downloadCmd.Parse(os.Args[2:])
+
+		if *outputFile == "" {
+			fmt.Println("Output file path is required")
+			downloadPieceCmd.PrintDefaults()
+			os.Exit(1)
+		}
+
+		file := createFile(*outputFile)
+		defer file.Close()
+
+		torrentPath := os.Args[4]
+		fileData := download(torrentPath)
+		file.Write(fileData)
 
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
 	}
+}
+
+func createFile(outputFile string) *os.File {
+
+	// create directory if it doesnt exist
+	outputDir := filepath.Dir(outputFile)
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		err := os.MkdirAll(outputDir, os.ModePerm)
+		if err != nil {
+			fmt.Println("Failed to create directory", err)
+			return nil
+		}
+	}
+
+	// create file if it doesnt exist
+	file, err := os.Create(outputFile)
+	if err != nil {
+		fmt.Println("Failed to create output file", err)
+		return nil
+	}
+
+	return file
 }

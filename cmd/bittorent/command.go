@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 )
 
 const (
@@ -358,6 +359,63 @@ func downloadPiece(torrentPath string, pieceIndex int) []byte {
 	}
 
 	return pieceData
+}
+
+func download(torrentPath string) []byte {
+	torrent, err := parseTorrentFile(torrentPath)
+	if err != nil {
+		log.Printf("Failed to parse torrent: %v", err)
+	}
+
+	torrentInfo := torrent["info"].(map[string]interface{})
+	fileLength := torrentInfo["length"].(int)
+	standardPieceLength := torrentInfo["piece length"].(int)
+	numPieces := (fileLength + standardPieceLength - 1) / standardPieceLength
+
+	piecesChan := make(chan struct {
+		index int
+		data  []byte
+	}, numPieces)
+
+	// WaitGroup to wait for all downlaods to finish
+	var wg sync.WaitGroup
+
+	maxConcurrent := 5
+	semaphore := make(chan int, maxConcurrent)
+
+	for i := 0; i < numPieces; i++ {
+		wg.Add(1)
+		go func(pieceIndex int) {
+			defer wg.Done()
+
+			semaphore <- 1
+			defer func() { <-semaphore }()
+
+			pieceData := downloadPiece(torrentPath, pieceIndex)
+			piecesChan <- struct {
+				index int
+				data  []byte
+			}{pieceIndex, pieceData}
+		}(i)
+	}
+
+	// close pieces channel when all downloads are done
+	go func() {
+		wg.Wait()
+		close(piecesChan)
+	}()
+
+	pieces := make([][]byte, numPieces)
+	for piece := range piecesChan {
+		pieces[piece.index] = piece.data
+	}
+
+	fileData := make([]byte, 0, fileLength)
+	for i := 0; i < numPieces; i++ {
+		fileData = append(fileData, pieces[i]...)
+	}
+
+	return fileData
 }
 
 func sendBlockRequest(conn net.Conn, pieceIndex, offset, blockSize int) error {
