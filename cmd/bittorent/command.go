@@ -377,7 +377,7 @@ func download(torrentPath string) []byte {
 		data  []byte
 	}, numPieces)
 
-	// WaitGroup to wait for all downlaods to finish
+	// WaitGroup to wait for all downloads to finish
 	var wg sync.WaitGroup
 
 	maxConcurrent := 5
