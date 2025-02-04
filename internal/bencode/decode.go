@@ -1,4 +1,4 @@
-package main
+package bencode
 
 import (
 	"fmt"
@@ -19,11 +19,14 @@ func NewBencodeDecoder(data []byte) *BencodeDecoder {
 }
 
 const (
-	typeList  = 'l'
-	typeDict  = 'd'
-	typeInt   = 'i'
-	endMarker = 'e'
-	separator = ':'
+	typeList byte = iota + 'l'
+	typeDict      = 'd'
+	typeInt       = 'i'
+)
+
+const (
+	endMarker byte = 'e'
+	separator byte = ':'
 )
 
 // Bencode (said Bee-encode) is a serialization format used in the Bit torrent protocol

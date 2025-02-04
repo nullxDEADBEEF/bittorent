@@ -1,4 +1,4 @@
-package main
+package torrent
 
 import (
 	"crypto/sha1"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+
+	"github.com/nullxDEADBEEF/bittorrent/internal/bencode"
 )
 
 const (
@@ -33,13 +35,13 @@ func NewTorrentEncoder() *TorrentEncoder {
 //   - pieces: concatenated SHA-1 hashes of each piece
 //
 // NOTE: info dictionary is slightly different for multi-file torrents
-func parseTorrentFile(filepath string) (map[string]interface{}, error) {
+func ParseTorrentFile(filepath string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(filepath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %v", err)
 	}
 
-	decoder := NewBencodeDecoder(data)
+	decoder := bencode.NewBencodeDecoder(data)
 	decoded, err := decoder.Decode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode dictionary: %v", err)
@@ -77,7 +79,7 @@ func (e *TorrentEncoder) CalculateSHA1Hash(bencodedInfo []byte) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func (e *TorrentEncoder) encodeTorrentInfo(torrentInfo map[string]interface{}) []byte {
+func (e *TorrentEncoder) EncodeTorrentInfo(torrentInfo map[string]interface{}) []byte {
 	return []byte(e.encodeDict(torrentInfo))
 }
 

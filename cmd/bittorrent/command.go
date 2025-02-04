@@ -12,6 +12,9 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/nullxDEADBEEF/bittorrent/internal/bencode"
+	t "github.com/nullxDEADBEEF/bittorrent/internal/torrent"
 )
 
 const (
@@ -32,8 +35,15 @@ const (
 	PieceDataStart      byte = 9
 )
 
+type DownloadConfig struct {
+	TorrentPath string
+	OutputPath  string
+	PieceIndex  int
+	Concurrency int
+}
+
 func handleDecode(bencodedValue string) string {
-	decoder := NewBencodeDecoder([]byte(bencodedValue))
+	decoder := bencode.NewBencodeDecoder([]byte(bencodedValue))
 	decoded, err := decoder.Decode()
 	if err != nil {
 		fmt.Println(err)
@@ -45,15 +55,15 @@ func handleDecode(bencodedValue string) string {
 }
 
 func handleInfo(torrentPath string) {
-	torrent, err := parseTorrentFile(torrentPath)
+	torrent, err := t.ParseTorrentFile(torrentPath)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	encoder := NewTorrentEncoder()
+	encoder := t.NewTorrentEncoder()
 	torrentInfo := torrent["info"].(map[string]interface{})
-	bencodedInfo := encoder.encodeTorrentInfo(torrentInfo)
+	bencodedInfo := encoder.EncodeTorrentInfo(torrentInfo)
 	infoHash := encoder.CalculateSHA1Hash(bencodedInfo)
 	pieceHashes := encoder.GetTorrentPieceHashes(torrentInfo["pieces"].([]byte))
 
@@ -66,15 +76,15 @@ func handleInfo(torrentPath string) {
 }
 
 func handlePeers(torrentPath string) []string {
-	torrent, err := parseTorrentFile(torrentPath)
+	torrent, err := t.ParseTorrentFile(torrentPath)
 	if err != nil {
 		fmt.Println(err)
 		return []string{}
 	}
 
-	encoder := NewTorrentEncoder()
+	encoder := t.NewTorrentEncoder()
 	torrentInfo := torrent["info"].(map[string]interface{})
-	bencodedInfo := encoder.encodeTorrentInfo(torrentInfo)
+	bencodedInfo := encoder.EncodeTorrentInfo(torrentInfo)
 	infoHash := encoder.CalculateSHA1Hash(bencodedInfo)
 
 	peers, err := getPeers(torrent, torrentInfo, infoHash)
@@ -93,15 +103,15 @@ func handleHandshake(torrentPath string, peerIP string) (net.Conn, string) {
 		return nil, ""
 	}
 
-	torrent, err := parseTorrentFile(torrentPath)
+	torrent, err := t.ParseTorrentFile(torrentPath)
 	if err != nil {
 		fmt.Println(err)
 		return nil, ""
 	}
 
 	torrentInfo := torrent["info"].(map[string]interface{})
-	encoder := NewTorrentEncoder()
-	bencodedInfo := encoder.encodeTorrentInfo(torrentInfo)
+	encoder := t.NewTorrentEncoder()
+	bencodedInfo := encoder.EncodeTorrentInfo(torrentInfo)
 	infoHash := encoder.CalculateSHA1Hash(bencodedInfo)
 
 	handshake := make([]byte, 0)
@@ -157,7 +167,7 @@ func getPeers(torrent map[string]interface{}, torrentInfo map[string]interface{}
 		return nil, err
 	}
 
-	decoder := NewBencodeDecoder(body)
+	decoder := bencode.NewBencodeDecoder(body)
 	decoded, err := decoder.Decode()
 	if err != nil {
 		return nil, err
@@ -241,12 +251,12 @@ After combining blocks into pieces, we have to check the integrity of each piece
 by comparing the hash with the piece hash found in the torrent file
 */
 func downloadPiece(torrentPath string, pieceIndex int) []byte {
-	torrent, err := parseTorrentFile(torrentPath)
+	torrent, err := t.ParseTorrentFile(torrentPath)
 	if err != nil {
 		log.Printf("Failed to parse torrent: %v", err)
 	}
 
-	encoder := NewTorrentEncoder()
+	encoder := t.NewTorrentEncoder()
 	torrentInfo := torrent["info"].(map[string]interface{})
 	pieceHashes := encoder.GetTorrentPieceHashes(torrentInfo["pieces"].([]byte))
 	standardPieceLength := torrentInfo["piece length"].(int)
@@ -362,7 +372,7 @@ func downloadPiece(torrentPath string, pieceIndex int) []byte {
 }
 
 func download(torrentPath string) []byte {
-	torrent, err := parseTorrentFile(torrentPath)
+	torrent, err := t.ParseTorrentFile(torrentPath)
 	if err != nil {
 		log.Printf("Failed to parse torrent: %v", err)
 	}
@@ -432,3 +442,17 @@ func sendBlockRequest(conn net.Conn, pieceIndex, offset, blockSize int) error {
 	_, err := conn.Write(request)
 	return err
 }
+
+// Magnet links allows users to download files from peers without needing a torrent file
+// Unlike .torrent files, magnet links dont contain information like file length, piece lenghth and piece hashes
+// They only include the bare minimum neccesary to discover peers.
+// Clients can request the rest of the information from peers using the
+// metadata exchange protocol
+// Query params in a magnet link:
+//
+//	xt: urn:btih: followed by the 40 char hex-encoded info hash
+//	dn: name of the file to be downloaded
+//	tr: tracker URL
+//func handleMagnetLink(magnetLink string) {
+//	parsedMagnetLink := magnetlink.Parse(magnetLink)
+//}

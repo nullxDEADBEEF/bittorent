@@ -68,7 +68,10 @@ func main() {
 		torrentPath := os.Args[4]
 		fileData := download(torrentPath)
 		file.Write(fileData)
-
+	case "magnet_parse":
+		break
+		//magnetLink := os.Args[2]
+		//handleMagnetLink(magnetLink)
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)

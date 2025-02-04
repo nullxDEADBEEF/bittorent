@@ -1,3 +1,3 @@
-module github.com/nullxDEADBEEF/bittorent
+module github.com/nullxDEADBEEF/bittorrent
 
 go 1.23
